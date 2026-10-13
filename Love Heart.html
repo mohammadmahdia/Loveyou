@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Love Heart</title>
+<style>
+:root{--bg:#050507;--ink:#ff3b4e;--hi:#ffe3e6;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{margin:0;background:var(--bg);overflow:hidden}
+body{height:100%}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="A heart filled with the words I love you in many languages"></canvas>
+<script>
+const WORDS=["I love you","Ich liebe dich","Je t'aime","Te amo","Ti amo","Eu te amo","Ik hou van jou","Jag älskar dig","Kocham cię","Я тебя люблю","Я тебе кохаю","Σ' αγαπώ","Seni seviyorum","愛してる","我爱你","사랑해","ฉันรักเธอ","मैं तुमसे प्यार करता हूँ","Aku cinta kamu","Anh yêu em","دوستت دارم","أحبك","مجھے تم سے محبت ہے","আমি তোমাকে ভালোবাসি","நான் உன்னை காதலிக்கிறேன்","ਮੈਂ ਤੈਨੂੰ ਪਿਆਰ ਕਰਦਾ ਹਾਂ","म तिमीलाई माया गर्छु","Nakupenda","Ngiyakuthanda","Ek is lief vir jou","Minä rakastan sinua","Jeg elsker deg","Jeg elsker dig","Ég elska þig","Miluji tě","Ľúbim ťa","Szeretlek","Te iubesc","Обичам те","Волим те","Volim te","Të dua","Aš tave myliu","Es tevi mīlu","Ma armastan sind","Tá grá agam duit","Rwy'n dy garu di","მიყვარხარ","Ես քեզ սիրում եմ","Səni sevirəm","Мен сені сүйемін","Seni sevaman","Би чамд хайртай","ខ្ញុំស្រលាញ់អ្នក","ຂ້ອຍຮັກເຈົ້າ","ချစ်တယ်","Saya cintakan awak","Mahal kita","Inħobbok","T'estimo","Maite zaitut","Mi amas vin","Aloha au iā ʻoe","Kei te aroha au ki a koe","Mo nifẹ rẹ","እወድሃለሁ","Waan ku jeclahay","我愛你","මම ඔබට ආදරෙයි","ഞാൻ നിന്നെ സ്നേഹിക്കുന്നു","ನಾನು ನಿನ್ನನ್ನು ಪ್ರೀತಿಸುತ್ತೇನೆ","నేను నిన్ను ప్రేమిస్తున్నాను","मी तुझ्यावर प्रेम करतो","હું તને પ્રેમ કરું છું","Quérote","Ech hunn dech gär","Я цябе кахаю","Те сакам","Ljubim te","Mwen renmen w","Munayki"];
+const PI=Math.PI,TAU=PI*2;
+// seconds: trace the outline, bloom the inside, hold + beat, fade, repeat
+const T_TRACE=3.4,T_DRAW=7.2,T_HOLD=9,T_OUT=1.6;
+const FONT='"Segoe UI",system-ui,"Noto Sans","Noto Sans Arabic",sans-serif';
+const NAME='هستی';
+const NFONT='Tahoma,"Segoe UI",system-ui,"Noto Naskh Arabic","Noto Sans Arabic",sans-serif';
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const calm=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const css=getComputedStyle(document.documentElement);
+const INK=css.getPropertyValue('--ink').trim()||'#ff3b4e';
+const HI=css.getPropertyValue('--hi').trim()||'#ffe3e6';
+let W,H,dpr,U,items=[],deck=[],nameBox=null,ptr={x:-999,y:-999},cs=null;
+
+// heart curve, y pointing down. t=PI is the bottom tip, t=0 the top cleft. Vertical centre sits at y=2.5
+const heart=t=>({x:16*Math.sin(t)**3,y:-(13*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))});
+const toXY=(t,s)=>{const p=heart(t);return{x:W/2+p.x*s*U,y:H/2+(p.y*s-2.5)*U}};
+function shuffled(){const a=WORDS.slice();for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+
+// x-spans where a horizontal line at height y is inside the heart
+function spans(poly,y){
+  const xs=[];
+  for(let i=0;i<poly.length;i++){
+    const a=poly[i],b=poly[(i+1)%poly.length];
+    if((a.y<=y&&b.y>y)||(b.y<=y&&a.y>y))xs.push(a.x+(y-a.y)/(b.y-a.y)*(b.x-a.x));
+  }
+  xs.sort((p,q)=>p-q);
+  const r=[];for(let i=0;i+1<xs.length;i+=2)r.push([xs[i],xs[i+1]]);
+  return r;
+}
+function meet(A,B){const r=[];for(const a of A)for(const b of B){const l=Math.max(a[0],b[0]),h=Math.min(a[1],b[1]);if(h>l)r.push([l,h])}return r}
+function segDist(p,poly){
+  let best=1e9,bi=0;
+  for(let i=0;i<poly.length;i++){
+    const a=poly[i],b=poly[(i+1)%poly.length],dx=b.x-a.x,dy=b.y-a.y;
+    let u=((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy||1);u=Math.max(0,Math.min(1,u));
+    const d=Math.hypot(p.x-(a.x+u*dx),p.y-(a.y+u*dy));
+    if(d<best){best=d;bi=i}
+  }
+  return{d:best,i:bi};
+}
+
+// Lay words out like justified lines of text, clipped to the heart so the shape is exact
+function build(){
+  dpr=Math.min(devicePixelRatio||1,2);
+  W=cv.clientWidth;H=cv.clientHeight;
+  cv.width=W*dpr;cv.height=H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  U=Math.min(W/34,H/32);
+  const fs=Math.max(8,Math.min(15,U*0.78)),rowH=fs*1.55,hh=rowH*0.36;
+  const N=260,poly=Array.from({length:N},(_,i)=>toXY(i/N*TAU,0.97));
+  const ys=poly.map(p=>p.y),ymin=Math.min(...ys),ymax=Math.max(...ys);
+  const rows=Math.floor((ymax-ymin)/rowH);
+  const y0=ymin+((ymax-ymin)-rows*rowH)/2+rowH/2;
+  const measure=(txt,sz)=>{ctx.font=`700 ${sz}px ${FONT}`;return ctx.measureText(txt).width};
+  items=[];deck=[];
+  // the name sits in the middle; the words are laid out around it
+  const nSz=Math.max(26,Math.min(96,U*4.6));
+  const nFont=`700 ${nSz}px ${NFONT}`;
+  ctx.font=nFont;
+  const nW=ctx.measureText(NAME).width,nH=nSz*1.25,pad=fs*0.8;
+  nameBox={x:W/2,y:H/2-U*3.2,sz:nSz,font:nFont,at:T_TRACE*0.5};
+  for(let r=0;r<rows;r++){
+    const yc=y0+r*rowH;
+    let sp=meet(meet(spans(poly,yc-hh),spans(poly,yc)),spans(poly,yc+hh));
+    if(Math.abs(yc-nameBox.y)<rowH/2+nH/2+pad*0.5){
+      const e0=nameBox.x-nW/2-pad,e1=nameBox.x+nW/2+pad;
+      sp=sp.flatMap(([a,b])=>{const q=[];if(Math.min(b,e0)-a>0)q.push([a,Math.min(b,e0)]);if(b-Math.max(a,e1)>0)q.push([Math.max(a,e1),b]);return q});
+    }
+    for(const [x0,x1] of sp){
+      const L=x1-x0;
+      if(L<fs*3)continue;
+      const gapMin=fs*0.9,chosen=[];let sum=0;
+      for(;;){
+        if(!deck.length)deck=shuffled();
+        let pick=-1,pw=0;
+        for(let i=deck.length-1;i>=0;i--){
+          const w=measure(deck[i],fs);
+          if((sum+w)*0.85+gapMin*chosen.length<=L){pick=i;pw=w;break}
+        }
+        if(pick<0)break;
+        chosen.push({txt:deck[pick],w:pw});sum+=pw;deck.splice(pick,1);
+      }
+      const n=chosen.length;
+      if(!n)continue;
+      const k=Math.max(0.85,Math.min(1.15,(L-gapMin*(n-1))/sum));
+      const gap=n>1?(L-sum*k)/(n-1):0;
+      let x=n>1?x0:x0+(L-sum*k)/2;
+      for(const c of chosen){
+        const w=c.w*k;
+        items.push({txt:c.txt,font:`700 ${fs*k}px ${FONT}`,x:x+w/2,y:yc,w});
+        x+=w+gap;
+      }
+    }
+  }
+  // timing: words touching the outline are traced from the bottom tip up both sides, the inside blooms out from the centre
+  const cx0=nameBox.x,cy0=nameBox.y; // the bloom starts at the name
+  let dmax=1;
+  for(const o of items){
+    let best={d:1e9,i:0};
+    for(const q of [[o.x-o.w/2,o.y],[o.x+o.w/2,o.y],[o.x,o.y-hh],[o.x,o.y+hh]]){
+      const r=segDist({x:q[0],y:q[1]},poly);if(r.d<best.d)best=r;
+    }
+    o.edge=best.d<rowH*0.45;
+    o.tp=Math.abs(best.i/N*TAU-PI)/PI;
+    o.dc=Math.hypot(o.x-cx0,o.y-cy0);
+    if(!o.edge)dmax=Math.max(dmax,o.dc);
+    o.ph=Math.random()*TAU;o.sp=0.5+Math.random()*1.1;
+  }
+  for(const o of items){
+    o.at=o.edge?o.tp*T_TRACE*0.92+Math.random()*0.1
+               :T_TRACE*0.5+Math.min(1,o.dc/dmax)*(T_DRAW-T_TRACE*0.5-0.9)+Math.random()*0.25;
+  }
+}
+
+function frame(now){
+  const t=now/1000;
+  if(cs===null)cs=t;
+  let lt=t-cs;
+  if(calm)lt=T_DRAW+1;
+  else if(lt>T_DRAW+T_HOLD+T_OUT){cs=t;lt=0}
+  const out=lt>T_DRAW+T_HOLD?Math.max(0,1-(lt-T_DRAW-T_HOLD)/T_OUT):1;
+  const bt=lt-T_DRAW,done=!calm&&bt>0;
+
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  const beat=done?1+0.03*Math.pow(Math.max(0,Math.sin(bt*3)),6):1;
+  ctx.translate(W/2,H/2);ctx.scale(beat,beat);ctx.translate(-W/2,-H/2);
+
+  // after each heartbeat a light ring runs from the centre out to the edge
+  const u=done?bt%(TAU/3):-1,ringOn=u>0.35&&u<1.7,rr=(u-0.35)*U*14;
+
+  const nAge=lt-nameBox.at,nFin=Math.max(0,Math.min(1,nAge/0.9));
+  if(nFin>0){ // soft red glow behind the name
+    const g=ctx.createRadialGradient(nameBox.x,nameBox.y,0,nameBox.x,nameBox.y,U*9);
+    g.addColorStop(0,'rgba(255,59,78,.28)');g.addColorStop(1,'rgba(255,59,78,0)');
+    ctx.globalAlpha=nFin*out;ctx.fillStyle=g;
+    ctx.fillRect(nameBox.x-U*9,nameBox.y-U*9,U*18,U*18);
+  }
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.shadowColor='rgba(255,59,78,.5)';ctx.shadowBlur=7;
+  for(const o of items){
+    const age=lt-o.at;
+    if(age<0)continue;
+    const fin=Math.min(1,age/0.55);
+    const e=1+2.70158*Math.pow(fin-1,3)+1.70158*Math.pow(fin-1,2); // ease-out-back: words pop in
+    const sc=0.3+0.7*e;
+    const tw=calm?0.8:0.5+0.5*Math.sin(t*o.sp+o.ph);
+    const base=o.edge?0.85+0.15*tw:0.5+0.5*Math.pow(tw,1.4);
+    const fresh=age<0.9?1-age/0.9:0;
+    const near=Math.max(0,1-Math.hypot(o.x-ptr.x,o.y-ptr.y)/90);
+    const ring=ringOn?Math.exp(-Math.pow((o.dc-rr)/(U*2.4),2))*(1-(u-0.35)/1.35*0.5)*0.9:0;
+    const glow=Math.max(fresh*0.9,near,ring);
+    const a=fin*out;
+    ctx.font=o.font;
+    for(let pass=0;pass<2;pass++){
+      const al=pass?a*glow:a*base;
+      if(al<0.02)continue;
+      ctx.globalAlpha=Math.min(1,al);
+      ctx.fillStyle=pass?HI:INK;
+      if(fin>=1)ctx.fillText(o.txt,o.x,o.y);
+      else{ctx.save();ctx.translate(o.x,o.y+(1-sc)*6);ctx.scale(sc,sc);ctx.fillText(o.txt,0,0);ctx.restore()}
+    }
+  }
+  if(nFin>0){
+    const e=1+2.70158*Math.pow(nFin-1,3)+1.70158*Math.pow(nFin-1,2); // pops in with a little overshoot
+    const pulse=done?1+0.05*Math.pow(Math.max(0,Math.sin(bt*3)),6):1;
+    ctx.save();
+    ctx.translate(nameBox.x,nameBox.y);ctx.scale(e*pulse,e*pulse);
+    ctx.font=nameBox.font;
+    ctx.shadowColor='rgba(255,59,78,.95)';ctx.shadowBlur=26;
+    ctx.globalAlpha=Math.min(1,nFin*1.4)*out;ctx.fillStyle=HI;
+    ctx.fillText(NAME,0,0);
+    ctx.restore();
+  }
+  ctx.globalAlpha=1;
+  requestAnimationFrame(frame);
+}
+
+function pos(e){const r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
+cv.addEventListener('pointermove',e=>{ptr=pos(e)});
+cv.addEventListener('pointerleave',()=>{ptr={x:-999,y:-999}});
+cv.addEventListener('pointerdown',e=>{ptr=pos(e);cs=performance.now()/1000}); // tap = draw the heart again
+cv.addEventListener('pointerup',e=>{if(e.pointerType!=='mouse')ptr={x:-999,y:-999}});
+let rz;addEventListener('resize',()=>{clearTimeout(rz);rz=setTimeout(build,150)});
+
+build();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
